@@ -1,0 +1,42 @@
+---
+title: "Modelling Assignment"
+author: "Tom Delany"
+date: "2026-03-08"
+output: html_document
+---
+
+
+```{r}
+library(dplyr)
+library(gt)
+```
+
+
+
+```{r}
+framing <- read.csv("framingham_heart_study.csv")
+
+dim(framing)
+length(is.na(framing))
+
+head(framing)
+
+missing_table <- data.frame(
+  Variable = names(framing),
+  Missing_Count = colSums(is.na(framing)),
+  Missing_Proportion = colMeans(is.na(framing)),
+  Missing_Percent = colMeans(is.na(framing)) * 100
+)
+
+missing_table
+
+sum(framing$TenYearCHD == 1)
+```
+
+Goal of the project
+
+
+
+
+
+

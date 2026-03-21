@@ -9,6 +9,9 @@ output: html_document
 ```{r}
 library(dplyr)
 library(gt)
+library(mice)
+library(tree)
+library(ggplot2)
 ```
 
 
@@ -33,6 +36,8 @@ missing_table
 sum(framing$TenYearCHD == 1)
 ```
 
+
+
 This analysis will evaluate the predictive performance and potential clinical usefulness of different modelling approaches for estimating the 10-year risk of coronary heart disease (CHD) using the Framingham dataset.
 
 The following sections will roughly follow the slides in my final presentation.
@@ -49,30 +54,172 @@ Missing data must be addressed in this analysis because several predictors in th
 For example, even when only a small proportion of predictor values are missing, complete case analysis may exclude a large proportion of subjects from the model, leading to less reliable estimates and reduced power.
 In addition, missing data may introduce selection bias if individuals with missing values differ systematically from those with complete data. Imputation methods therefore allow the use of information from partially observed records while reducing bias and improving the reliability of prediction models. 
 
+## Missingness Diagnostics
+
 Investigating Missingness:
 Missing data can arise through different mechanisms, including Missing Completely at Random (MCAR), where missingness occurs purely by chance; Missing at Random (MAR), where missingness is related to other observed variables in the dataset; and Missing Not at Random (MNAR), where the probability of missingness depends on the unobserved value itself or other unmeasured factors.
+
+```{r}
+missing_table %>%
+  arrange(desc(Missing_Count))
+```
 
 ```{r}
 md.pattern(framing)
 ```
 
-### Single and Multiple imputation using `mice` (Ref: Van Burren@2011)
-
-Now we will do multiple imputation using the `mice()` function in the `mice` library.  NB `mice` stands for multivariate imputation by chained equations.  
-
 ```{r}
-colSums(is.na(framing))
+# Variables with missingness in this dataset
+partial_vars <- names(which(colSums(is.na(framing)) > 0))
+partial_vars
 ```
+
+## Single and Multiple Imputation Using `mice` (Ref: Van Buuren 2011)
+
+First we split:
 ```{r}
-init <- mice(framing, maxit = 0)
+set.seed(214)
+
+train_index <- sample(1:nrow(framing), 0.7 * nrow(framing))
+
+train_data <- framing[train_index, ]
+test_data  <- framing[-train_index, ]
+```
+
+
+Now we will do multiple imputation using the `mice()` function in the `mice` library. NB `mice` stands for multivariate imputation by chained equations. We include `TenYearCHD` as a predictor in imputation models but do not impute `TenYearCHD`, so we can analyse each imputed dataset afterwards.
+
+```{r}
+train_data <- train_data %>%
+  mutate(
+    BPMeds = factor(BPMeds),                       # binary with missingness
+    education = ordered(education, levels = 1:4)   # ordinal with missingness
+  )
+
+test_data <- test_data %>%
+  mutate(
+    BPMeds = factor(BPMeds),                       # binary with missingness
+    education = ordered(education, levels = 1:4)   # ordinal with missingness
+  )
+
+```
+
+```{r}
+init <- mice(framing_to_impute, maxit = 0, print = FALSE)
 meth <- init$method
+pred <- init$predictorMatrix
+
+# Explicit methods
+meth[] <- ""
+meth["cigsPerDay"] <- "norm"
+meth["BPMeds"] <- "logreg"
+meth["education"] <- "polr"
+meth["totChol"] <- "norm"
+meth["BMI"] <- "norm"
+meth["heartRate"] <- "norm"
+meth["glucose"] <- "norm"
+meth["TenYearCHD"] <- ""  # do not impute outcome
+
+# Ensure outcome is not imputed but can be used to predict other variables
+pred["TenYearCHD", ] <- 0
+
 meth
+pred
+```
+
+Train Imputation
+```{r}
+framing.imputed.train <- mice(
+  data = train_data,
+  m = 1,
+  method = meth,
+  predictorMatrix = pred,
+  seed = 214,
+  maxit = 5,
+  print = FALSE
+)
+
+train_complete <- complete(framing.imputed.train)
+```
+
+Test Imputation
+
+```{r}
+#drop tenyearCHd being used in test impuation
+pred_test <- pred
+pred_test[, "TenYearCHD"] <- 0
+
+framing.imputed.test <- mice(
+  data = test_data,
+  m = 1,
+  method = meth,
+  predictorMatrix = pred,
+  seed = 214,
+  maxit = 5,
+  print = FALSE
+)
+
+test_complete <- complete(framing.imputed.test)
 ```
 
 
 ```{r}
-framing.imputed<-mice(data=framing , m=10, method=meth, seed=214, print=FALSE)
+# Convergence diagnostics
+plot(framing.imputed.train)
 ```
+```{r}
+# Convergence diagnostics
+plot(framing.imputed.test)
+```
+
+```{r}
+
+
+train_complete %>%
+  ggplot() +
+  geom_density(aes(x = glucose), col = "red", alpha = 0.01) +
+  geom_density(data = framing, aes(x = glucose), col ="blue")
+  
+```
+
+```{r}
+#Changing to factor so tree isnt a regression but classification tree
+train_complete$TenYearCHD <- factor(train_complete$TenYearCHD)
+test_complete$TenYearCHD  <- factor(test_complete$TenYearCHD)
+```
+
+
+
+Naive tree
+```{r}
+library(tree)
+
+tree.model <- tree(TenYearCHD ~ ., data = train_complete)
+
+tree.pred <- predict(tree.model, test_complete, type = "class")
+
+mean(tree.pred == test_complete$TenYearCHD)
+
+table(tree.pred, test_complete$TenYearCHD)
+```
+
+
+Random Forest
+```{r}
+
+library(randomForest)
+Framing.rf <- randomForest(TenYearCHD ~ ., 
+                        data = train_complete, 
+                        importance = TRUE,
+                        proximity = TRUE)
+```
+
+```{r}
+predictions <- predict(Framing.rf, newdata = test_data)
+confMatrix <- table(Predicted = predictions, Actual = test_data$TenYearCHD)
+confMatrix
+```
+
 
 
 

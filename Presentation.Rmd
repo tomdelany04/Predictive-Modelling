@@ -1,0 +1,122 @@
+---
+title: "Trees and Forests for Classification in the Framingham Heart Study"
+author: "Tom Delany"
+institute: "Department of Mathematics & Statistics"
+format: 
+  revealjs:
+    incremental: true
+    logo: "University_Of_Galway_Logo.png"
+    css: styles.css
+    footer: "Github link here"
+    slide-number: true
+    multiplex: false
+    theme: simple
+    show-slide-number: all
+    controls: true
+    width: 1280
+    height: 720
+execute:
+  echo: true
+resources:
+  - University_Of_Galway_Logo.png
+---
+
+
+## Agenda {.agenda-slide}
+
+- 🗄️ An introduction to the study and dataset
+- 🐭 Preparation of the dataset for classification (utilising imputation for missingness)
+- 🌳 Forests and trees for classification
+- 🧪 Evaluation and Conclusion
+
+::: {.info-box}
+<ul>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i> This slidedeck was built in <img src="Rstudio.png" style="height:40px; vertical-align:middle; position:relative; "> using <img src="quarto.png" style="height:40px; vertical-align:middle; position:relative; top:-6px;"></li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i> My GitHub repo is linked in the footer <img src="GitHub_Invertocat_Black.png" style="height:40px; vertical-align:middle; position:relative;top:-8px;"> </li>
+</ul>
+:::
+## The Framingham Heart Study <img src="map.png" height="120px" style="vertical-align:middle;"> 
+*  *Long-term*, **Multigenerational**, study conducted in *Framingham Massachusetts* from 1948- 
+
+::: {.info-box}
+ <ul >
+    <li class="fragment"><i class="fa-solid fa-bullseye"></i>The study aimed to help identify common factors in Cardiovascular Disease</li>
+    <li class="fragment"><i class="fa-solid fa-bowl-food"></i>Primary outcome: incident coronary heart disease (CHD), defined as first-onset CHD events during follow-up.</li>
+    <li class="fragment"><i class="fa-solid fa-link"></i>Details can be found [here](https://www.thelancet.com/journals/lancet/article/PIIS0140-6736(13)61752-3/fulltext).</li>
+</ul>
+:::
+
+
+## The Dataset
+
+*  The dataset was accessed from [kaggle](https://www.kaggle.com/datasets/aasheesh200/framingham-heart-study-dataset)
+
+::: {.info-box}
+<ul>
+  <li class="fragment"><i class="fa-solid fa-table"></i> Dimensions: <strong>4,240 rows</strong> and <strong>16 variables</strong>.</li>
+  <li class="fragment"><i class="fa-solid fa-triangle-exclamation"></i> Missingness proportions were highest for: <strong>Glucose (9.15%)</strong>, <strong>Education (2.48%)</strong>, <strong>Blood Pressure(1.25%)</strong>, and <strong>Total Cholesterol (1.18%)</strong>.</li>
+  <li class="fragment"><i class="fa-solid fa-magnifying-glass-chart"></i> Other predictors with missingness: <strong>Cigarettes/Day (0.68%)</strong>, <strong>BMI (0.45%)</strong>, and <strong>Heart Rate (0.02%)</strong>.</li>
+</ul>
+:::
+
+- This missingness pattern motivates using **MICE** to retain observations and reduce bias from complete-case analysis. <img src="missing_pattern.png" style="height:90px; vertical-align:middle; margin-left:10px;">
+
+## MICE <img src="MICE.png" style="height:80px; vertical-align:middle; position:relative; "> <span class="mice-cite"><a href="https://www.jstatsoft.org/article/view/v045i03">Van Buuren (2011)</a></span> {.mice-slide}
+
+::: {.columns}
+::: {.column width="42%"}
+::: {.mice-box}
+<p class="fragment" data-fragment-index="1"><strong>Multivariate Imputation by Chained Equations (MICE)</strong> fills missing values by iteratively modeling each incomplete variable using the others.</p>
+
+<p class="fragment" data-fragment-index="3">Here we set variable-specific methods (<code>norm</code>, <code>logreg</code>, <code>polr</code>) and keep <code>TenYearCHD</code> as a predictor without imputing it.</p>
+
+<p class="fragment" data-fragment-index="4">The algorithm cycles through incomplete variables until values stabilize.</p>
+
+:::
+:::
+
+::: {.column .fragment width="58%" data-fragment-index="2"}
+```{r des}
+#| echo: true
+#| eval: false
+#| code-line-numbers: "|1-3|5-14|16-20|"
+init <- mice(train_data, maxit = 0, print = FALSE)
+meth <- init$method
+pred <- init$predictorMatrix
+
+meth[] <- ""
+meth["cigsPerDay"] <- "norm"
+meth["BPMeds"] <- "logreg"
+meth["education"] <- "polr"
+meth["totChol"] <- "norm"
+meth["BMI"] <- "norm"
+meth["heartRate"] <- "norm"
+meth["glucose"] <- "norm"
+meth["TenYearCHD"] <- ""
+pred["TenYearCHD", ] <- 0
+
+framing.imputed.train <- mice(
+  data = train_data, m = 20, method = meth,
+  predictorMatrix = pred, seed = 214, maxit = 5
+)
+train_complete <- complete(framing.imputed.train)
+```
+
+::: {.info-box .fragment data-fragment-index="2"}
+<ul>
+  <li><strong>Data split:</strong> 70% train, 30% test.</li>
+  <li><strong>Why MICE:</strong> preserves sample size and reduces complete-case bias.</li>
+</ul>
+:::
+:::
+:::
+
+
+## Results
+
+- Result A
+- Result B
+
+## Conclusion
+
+Thanks!

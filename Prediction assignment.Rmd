@@ -65,7 +65,9 @@ missing_table %>%
 ```
 
 ```{r}
-md.pattern(framing)
+png("missing_pattern.png", width = 1400, height = 900, res = 150)
+md.pattern(framing, plot = TRUE)
+dev.off()
 ```
 
 ```{r}
@@ -105,6 +107,8 @@ test_data <- test_data %>%
 ```
 
 ```{r}
+framing_to_impute <- train_data
+
 init <- mice(framing_to_impute, maxit = 0, print = FALSE)
 meth <- init$method
 pred <- init$predictorMatrix
@@ -153,7 +157,7 @@ framing.imputed.test <- mice(
   data = test_data,
   m = 1,
   method = meth,
-  predictorMatrix = pred,
+  predictorMatrix = pred_test,
   seed = 214,
   maxit = 5,
   print = FALSE
@@ -198,9 +202,25 @@ tree.model <- tree(TenYearCHD ~ ., data = train_complete)
 
 tree.pred <- predict(tree.model, test_complete, type = "class")
 
-mean(tree.pred == test_complete$TenYearCHD)
+tree_cm <- table(Predicted = tree.pred, Actual = test_complete$TenYearCHD)
+tree_cm
 
-table(tree.pred, test_complete$TenYearCHD)
+tree_accuracy <- mean(tree.pred == test_complete$TenYearCHD)
+tree_misclass <- 1 - tree_accuracy
+tree_sensitivity <- tree_cm["1", "1"] / sum(tree_cm[, "1"])
+tree_specificity <- tree_cm["0", "0"] / sum(tree_cm[, "0"])
+
+c(
+  Accuracy = tree_accuracy,
+  Misclassification = tree_misclass,
+  Sensitivity = tree_sensitivity,
+  Specificity = tree_specificity
+)
+```
+
+```{r}
+plot(tree.model)
+text(tree.model, pretty = 0, cex = 0.7)
 ```
 
 
@@ -215,9 +235,106 @@ Framing.rf <- randomForest(TenYearCHD ~ .,
 ```
 
 ```{r}
-predictions <- predict(Framing.rf, newdata = test_data)
-confMatrix <- table(Predicted = predictions, Actual = test_data$TenYearCHD)
-confMatrix
+rf_pred <- predict(Framing.rf, newdata = test_complete)
+rf_cm <- table(Predicted = rf_pred, Actual = test_complete$TenYearCHD)
+rf_cm
+
+rf_accuracy <- mean(rf_pred == test_complete$TenYearCHD)
+rf_misclass <- 1 - rf_accuracy
+rf_sensitivity <- rf_cm["1", "1"] / sum(rf_cm[, "1"])
+rf_specificity <- rf_cm["0", "0"] / sum(rf_cm[, "0"])
+rf_oob_error <- Framing.rf$err.rate[nrow(Framing.rf$err.rate), "OOB"]
+
+c(
+  Accuracy = rf_accuracy,
+  Misclassification = rf_misclass,
+  Sensitivity = rf_sensitivity,
+  Specificity = rf_specificity,
+  OOB_Error = rf_oob_error
+)
+```
+
+```{r}
+plot(Framing.rf)
+varImpPlot(Framing.rf)
+```
+
+
+Bayesian Additive Regression Trees (BART)
+```{r}
+library(BART)
+
+x_train <- train_complete %>% dplyr::select(-TenYearCHD)
+x_test  <- test_complete %>% dplyr::select(-TenYearCHD)
+y_train <- as.numeric(as.character(train_complete$TenYearCHD))
+y_test  <- as.numeric(as.character(test_complete$TenYearCHD))
+
+set.seed(1)
+bartfit <- pbart(x.train = x_train, y.train = y_train, x.test = x_test)
+```
+
+```{r}
+# Predicted probability of CHD=1
+bart_prob <- if (!is.null(bartfit$prob.test.mean)) bartfit$prob.test.mean else bartfit$yhat.test.mean
+bart_pred <- factor(ifelse(bart_prob >= 0.5, 1, 0), levels = c(0, 1))
+
+bart_cm <- table(Predicted = bart_pred, Actual = test_complete$TenYearCHD)
+bart_cm
+
+bart_accuracy <- mean(bart_pred == test_complete$TenYearCHD)
+bart_misclass <- 1 - bart_accuracy
+bart_sensitivity <- bart_cm["1", "1"] / sum(bart_cm[, "1"])
+bart_specificity <- bart_cm["0", "0"] / sum(bart_cm[, "0"])
+
+c(
+  Accuracy = bart_accuracy,
+  Misclassification = bart_misclass,
+  Sensitivity = bart_sensitivity,
+  Specificity = bart_specificity
+)
+```
+
+```{r}
+# Variable usage across posterior trees
+ord <- order(bartfit$varcount.mean, decreasing = TRUE)
+bartfit$varcount.mean[ord]
+```
+
+
+Ridge regression (benchmark)
+```{r}
+library(glmnet)
+
+x_train_mm <- model.matrix(TenYearCHD ~ ., data = train_complete)[, -1]
+x_test_mm  <- model.matrix(TenYearCHD ~ ., data = test_complete)[, -1]
+y_train_num <- as.numeric(as.character(train_complete$TenYearCHD))
+
+set.seed(214)
+ridge_cv <- cv.glmnet(
+  x = x_train_mm,
+  y = y_train_num,
+  family = "binomial",
+  alpha = 0
+)
+
+ridge_prob <- as.numeric(predict(ridge_cv, newx = x_test_mm, s = "lambda.min", type = "response"))
+ridge_pred <- factor(ifelse(ridge_prob >= 0.5, 1, 0), levels = c(0, 1))
+
+ridge_cm <- table(Predicted = ridge_pred, Actual = test_complete$TenYearCHD)
+ridge_cm
+
+ridge_accuracy <- mean(ridge_pred == test_complete$TenYearCHD)
+ridge_misclass <- 1 - ridge_accuracy
+ridge_sensitivity <- ridge_cm["1", "1"] / sum(ridge_cm[, "1"])
+ridge_specificity <- ridge_cm["0", "0"] / sum(ridge_cm[, "0"])
+
+c(
+  Accuracy = ridge_accuracy,
+  Misclassification = ridge_misclass,
+  Sensitivity = ridge_sensitivity,
+  Specificity = ridge_specificity,
+  Lambda = ridge_cv$lambda.min
+)
 ```
 
 

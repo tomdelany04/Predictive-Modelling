@@ -1,5 +1,6 @@
 ---
 title: "Trees and Forests for Classification in the Framingham Heart Study"
+subtitle: "![](Framingham.png){width=180px}"
 author: "Tom Delany"
 institute: "Department of Mathematics & Statistics"
 format: 
@@ -19,15 +20,16 @@ execute:
   echo: true
 resources:
   - University_Of_Galway_Logo.png
+  - Framingham.png
 ---
 
 
 ## Agenda {.agenda-slide}
 
-- 🗄️ An introduction to the study and dataset
-- 🐭 Preparation of the dataset for classification (utilising imputation for missingness)
-- 🌳 Forests and trees for classification
-- 🧪 Evaluation and Conclusion
+- An introduction to the study and dataset
+- Preparation of the dataset for classification (utilising imputation for missingness)
+- Forests and trees for classification
+- Evaluation and Conclusion
 
 ::: {.info-box}
 <ul>
@@ -36,7 +38,7 @@ resources:
 </ul>
 :::
 ## The Framingham Heart Study <img src="map.png" height="120px" style="vertical-align:middle;"> 
-*  *Long-term*, **Multigenerational**, study conducted in *Framingham Massachusetts* from 1948- 
+*  *Long-term*, **Multigenerational**, study conducted in *Framingham Massachusetts* from 1948-present 
 
 ::: {.info-box}
  <ul >
@@ -61,7 +63,7 @@ resources:
 
 - This missingness pattern motivates using **MICE** to retain observations and reduce bias from complete-case analysis. <img src="missing_pattern.png" style="height:90px; vertical-align:middle; margin-left:10px;">
 
-## MICE <img src="MICE.png" style="height:80px; vertical-align:middle; position:relative; "> <span class="mice-cite"><a href="https://www.jstatsoft.org/article/view/v045i03">Van Buuren (2011)</a></span> {.mice-slide}
+## MICE <img src="MICE.png" style="height:80px; vertical-align:middle; position:relative; "> <span class="mice-cite"><a href="https://www.jstatsoft.org/article/view/v045i03">Van Buuren & Groothuis-Oudshoorn(2011)</a></span> {.mice-slide}
 
 ::: {.columns}
 ::: {.column width="42%"}
@@ -112,11 +114,164 @@ train_complete <- complete(framing.imputed.train)
 :::
 
 
-## Results
+## Pooling, Tree Fitting, and Test Evaluation
 
-- Result A
-- Result B
+::: {.info-box}
+<ul>
+  <li class="fragment"><strong>Pooling after imputation:</strong> fit models across imputed training datasets and combine estimates/predictions to reduce Monte Carlo noise.</li>
+  <li class="fragment"><strong>Training stage:</strong> all tree-based models are fit on the <strong>70% imputed training set(s)</strong>.</li>
+  <li class="fragment"><strong>Evaluation stage:</strong> final performance is assessed on the <strong>30% imputed test set</strong> using confusion matrix, accuracy, sensitivity, and specificity.</li>
+</ul>
+:::
 
-## Conclusion
+- Models fit in this project: <strong>Pruned Decision Tree</strong>, Random Forest, BART, and Ridge Regression (benchmark).
 
-Thanks!
+
+## Classic Decision Tree  {.tree-slide}
+
+::: {.columns}
+::: {.column width="42%"}
+::: {.mice-box}
+<p class="fragment" data-fragment-index="1"><strong>Classification Decision Trees</strong> use a top-down, greedy approach known as recursive binary splitting.</p>
+
+<p class="fragment" data-fragment-index="3">We use the Gini index for binary splits, this measure of inequality, was first introduced by Italian Statistician Corrado [Gini](https://ourworldindata.org/what-is-the-gini-coefficient) in 1912</p>
+
+<p class="fragment" data-fragment-index="4">We can evaluate our trees performance using a variety of metrics, we will assess the results of all our approaches at the end of this lecture</p>
+
+:::
+:::
+
+::: {.column .fragment width="58%" data-fragment-index="2"}
+```{r tree}
+#| echo: true
+#| eval: false
+#| code-line-numbers: "|1-7|9-11|12-19|"
+library(tree)
+tree_prob_list <- vector("list", length(train_all))
+for (i in seq_along(train_all)) {
+  tree_fit_i <- tree(TenYearCHD ~ ., data = train_all[[i]])
+  p_i <- predict(tree_fit_i, newdata = test_all[[i]], type = "vector")
+  tree_prob_list[[i]] <- p_i[, "1"]
+}
+
+tree_cm <- table(Predicted = tree.pred, Actual = tree_actual)
+tree_cm
+
+tree_accuracy <- mean(tree.pred == tree_actual)
+tree_misclass <- 1 - tree_accuracy
+tree_sensitivity <- tree_cm["1", "1"] / sum(tree_cm[, "1"])
+tree_specificity <- tree_cm["0", "0"] / sum(tree_cm[, "0"])
+```
+
+::: {.info-box .fragment data-fragment-index="2"}
+<ul>
+  <li><i class="fa-solid fa-bullseye"></i><strong>Build the tree</strong> in the training data.</li>
+  <li><i class="fa-solid fa-bullseye"></i><strong>Evaluate performance</strong> in the test set.</li>
+  <li><i class="fa-solid fa-bullseye"></i><strong>Overfitting</strong> is a major issue in this naive        approach, pruning helps to combat this.</li>
+</ul>
+:::
+:::
+:::
+
+
+
+## Pruned tree 
+
+
+## Random Forest  {.rf-slide}
+
+::: {.columns}
+::: {.column width="42%"}
+::: {.mice-box}
+<p class="fragment" data-fragment-index="1"><strong>Random Forest is an ensemble method:</strong> it combines many decision trees built on bootstrap samples to produce a stronger overall model.</p>
+
+<p class="fragment" data-fragment-index="3"> For classification, each tree votes and the final class is the <strong>majority vote</strong>. Averaging over many trees reduces variance and improves prediction stability.</p>
+
+<p class="fragment" data-fragment-index="4"> At each split, only a <strong>random subset of predictors</strong> is considered (often <code>m ~ sqrt(p)</code>), so trees are less similar and averaging works better.</p>
+:::
+:::
+
+::: {.column .fragment width="58%" data-fragment-index="2"}
+```{r rf}
+#| echo: true
+#| eval: false
+#| code-line-numbers: "|1-6|8-10|12-17|"
+library(randomForest)
+Framing.rf <- randomForest(
+  TenYearCHD ~ ., data = train_complete,
+  mtry = floor(sqrt(ncol(train_complete) - 1)),
+  ntree = 500, importance = TRUE
+)
+
+rf_pred <- predict(Framing.rf, newdata = test_complete)
+rf_cm <- table(Predicted = rf_pred, Actual = test_complete$TenYearCHD)
+rf_cm
+
+rf_accuracy <- mean(rf_pred == test_complete$TenYearCHD)
+rf_sensitivity <- rf_cm["1", "1"] / sum(rf_cm[, "1"])
+rf_specificity <- rf_cm["0", "0"] / sum(rf_cm[, "0"])
+rf_oob_error <- Framing.rf$err.rate[nrow(Framing.rf$err.rate), "OOB"]
+```
+
+::: {.info-box .fragment data-fragment-index="2"}
+<ul>
+  <li><i class="fa-solid fa-bullseye"></i><strong>Training:</strong> fit the forest on imputed training data.</li>
+  <li><i class="fa-solid fa-bullseye"></i><strong>Testing:</strong> evaluate confusion matrix and sensitivity/specificity on test data.</li>
+  <li><i class="fa-solid fa-bullseye"></i><strong>OOB error:</strong> internal estimate of test error from out-of-bag observations.</li>
+</ul>
+:::
+:::
+:::
+
+## BART <img src="Bart_Simpson.png" style="height:90px; vertical-align:middle; position:relative; "> Bayesian Additive Regression Trees {.bart-slide}
+
+::: {.columns}
+::: {.column width="42%"}
+::: {.mice-box}
+<p class="fragment" data-fragment-index="1"><strong>BART combines ideas from bagging/RF and boosting:</strong> trees are built with randomness, but each tree also captures signal not yet explained by the current ensemble.</p>
+
+<p class="fragment" data-fragment-index="3"><strong>Relation to other methods:</strong> unlike bagging/RF (independent trees) and unlike pure boosting (strict sequential fitting), BART blends both in a Bayesian framework.</p>
+
+<p class="fragment" data-fragment-index="4"><strong>Flexible use:</strong> BART can be used for both regression and classification; here we use binary classification for <code>TenYearCHD</code>.</p>
+:::
+:::
+
+::: {.column .fragment width="58%" data-fragment-index="2"}
+```{r bart}
+#| echo: true
+#| eval: false
+#| code-line-numbers: "|1-4|6-8|10-13 |"
+library(BART)
+x_train <- train_complete %>% select(-TenYearCHD)
+x_test  <- test_complete %>% select(-TenYearCHD)
+y_train <- as.numeric(as.character(train_complete$TenYearCHD))
+
+bartfit <- pbart(x.train = x_train, y.train = y_train, x.test = x_test)
+bart_prob <- bartfit$prob.test.mean
+bart_pred <- factor(ifelse(bart_prob >= 0.5, 1, 0), levels = c(0, 1))
+
+bart_cm <- table(Predicted = bart_pred, Actual = test_complete$TenYearCHD)
+bart_accuracy <- mean(bart_pred == test_complete$TenYearCHD)
+bart_sensitivity <- bart_cm["1", "1"] / sum(bart_cm[, "1"])   
+bart_specificity <- bart_cm["0", "0"] / sum(bart_cm[, "0"])
+```
+
+::: {.info-box .fragment data-fragment-index="2"}
+<ul>
+  <li><i class="fa-solid fa-bullseye"></i><strong>Training:</strong> fit Bayesian tree ensemble on imputed training data.</li>
+  <li><i class="fa-solid fa-bullseye"></i><strong>Prediction:</strong> convert posterior mean probabilities to classes.</li>
+  <li><i class="fa-solid fa-bullseye"></i><strong>Evaluation:</strong> assess confusion matrix, sensitivity, and specificity on test data.</li>
+</ul>
+:::
+:::
+:::
+
+
+## References 
+
+- <span class="mice-cite"><a href="https://www.jstatsoft.org/article/view/v045i03">Van Buuren & Groothuis-Oudshoorn (2011)</a>
+
+- <span class="mice-cite"><a href="https://www.thelancet.com/action/showPdf?pii=S0140-6736%2813%2961752-3">S Mahmood et al., (2014)</a>
+
+
+

@@ -118,13 +118,13 @@ train_complete <- complete(framing.imputed.train)
 
 ::: {.info-box}
 <ul>
-  <li class="fragment"><strong>Pooling after imputation:</strong> fit models across imputed training datasets and combine estimates/predictions to reduce Monte Carlo noise.</li>
+  <li class="fragment"><strong>Pooling after imputation:</strong> fit models across imputed training datasets and combine estimates</li>
   <li class="fragment"><strong>Training stage:</strong> all tree-based models are fit on the <strong>70% imputed training set(s)</strong>.</li>
-  <li class="fragment"><strong>Evaluation stage:</strong> final performance is assessed on the <strong>30% imputed test set</strong> using confusion matrix, accuracy, sensitivity, and specificity.</li>
+  <li class="fragment"><strong>Evaluation stage:</strong> final performance is assessed on the <strong>30% imputed test set</strong> using Calibration and ROC plots, accuracy, sensitivity, and specificity.</li>
 </ul>
 :::
 
-- Models fit in this project: <strong>Pruned Decision Tree</strong>, Random Forest, BART, and Ridge Regression (benchmark).
+- Models fit in this project: <strong>Pruned Decision Tree</strong>, Random Forest, BART.
 
 
 ## Pruned tree  {.tree-slide}
@@ -169,7 +169,6 @@ text(0.6, 0.2, paste("AUC =", round(auc_value_prune, 3)))
 <ul>
   <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Build the tree</strong> in the training data.</li>
   <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Evaluate performance</strong> in the test set.</li>
-  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Overfitting</strong> is a major issue in this approach, pruning helps to combat this.</li>
 </ul>
 :::
 :::
@@ -183,7 +182,7 @@ text(0.6, 0.2, paste("AUC =", round(auc_value_prune, 3)))
 ::: {.mice-box}
 <p class="fragment" data-fragment-index="1"><strong>Random Forest is an ensemble method:</strong> it combines many decision trees built on bootstrap samples to produce a stronger overall model.</p>
 
-<p class="fragment" data-fragment-index="3"> For classification, each tree votes and the final class is the <strong>majority vote</strong>. Averaging over many trees reduces variance and improves prediction stability.</p>
+<p class="fragment" data-fragment-index="3"> Averaging over many trees reduces variance and improves prediction stability.</p>
 
 <p class="fragment" data-fragment-index="4"> At each split, only a <strong>random subset of predictors</strong> is considered (often <code>m ~ sqrt(p)</code>), so trees are less similar and averaging works better.</p>
 :::
@@ -269,9 +268,7 @@ bart_pred <- factor(ifelse(bart_prob >= 0.5, 1, 0), levels = c(0, 1))
 
 ## Results {.results-slide}
 
-::: {.results-grid}
-::: {.results-left}
-::: {.info-box .results-notes}
+::: {.info-box}
 <ul>
   <li class="fragment" data-fragment-index="1"><i class="fa-solid fa-bullseye"></i><strong>Pruned tree simplicity:</strong> only two splits (<code>age</code>, then <code>sysBP</code>) keep the rule set interpretable.</li>
   <li class="fragment" data-fragment-index="2"><i class="fa-solid fa-chart-line"></i><strong>RF importance:</strong> top-ranked variables are <code>sysBP</code>, <code>BMI</code>, <code>glucose</code>, and <code>totChol</code>.</li>
@@ -279,13 +276,27 @@ bart_pred <- factor(ifelse(bart_prob >= 0.5, 1, 0), levels = c(0, 1))
 </ul>
 :::
 
-::: {.results-summary .fragment data-fragment-index="5"}
+::: {.columns}
+::: {.column .fragment width="50%" data-fragment-index="4"}
 ```{r}
 #| echo: false
 #| warning: false
 #| message: false
-#| fig-width: 5
-#| fig-height: 1.7
+#| fig-width: 6
+#| fig-height: 3.2
+
+importance_plot_obj <- readRDS("importance_plot_obj.rds")
+importance_plot_obj
+```
+:::
+
+::: {.column .fragment width="50%" data-fragment-index="5"}
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 6
+#| fig-height: 3.2
 
 results_summary_plot_obj <- readRDS("results_summary_plot_obj.rds")
 results_summary_plot_obj
@@ -293,30 +304,13 @@ results_summary_plot_obj
 :::
 :::
 
-::: {.results-right}
-::: {.fragment data-fragment-index="4"}
-```{r}
-#| echo: false
-#| warning: false
-#| message: false
-#| fig-width: 8
-#| fig-height: 3.9
-
-importance_plot_obj <- readRDS("importance_plot_obj.rds")
-importance_plot_obj
-```
-:::
-:::
-:::
-
-
-## Best of a Bad Bunch {.bart-best-slide}
+## Results {.bart-best-slide}
 
 ::: {.info-box}
 <ul>
   <li class="fragment"><strong>Best discrimination:</strong> BART delivered the highest AUC (0.719) in our test-set comparison.</li>
-  <li class="fragment"><strong>Why it wins:</strong> Bayesian regularization plus sequential tree updates helps capture nonlinear signal while controlling overfit.</li>
   <li class="fragment"><strong>Practical upside:</strong> strong performance with limited tuning.</li>
+  <li class="fragment"><strong>Much the same:</strong> BART, Random Forest and the Pruned tree models had similar test set performance measures</li>
 </ul>
 :::
 
@@ -358,9 +352,6 @@ calibration_plot_obj
 </ul>
 :::
 
-- In practice, these alternatives can reduce variance, handle correlated predictors more effectively, and improve out-of-sample accuracy.
-
-
 ## References
 
 - <span class="mice-cite"><a href="https://www.jstatsoft.org/article/view/v045i03">Van Buuren & Groothuis-Oudshoorn (2011)</a> - MICE
@@ -369,8 +360,7 @@ calibration_plot_obj
 
 - <span class="mice-cite"><a href="https://emitanaka.org/slides/toronto2022/#/title-slide">E Tanaka (2022)</a> - Template for Presentation
 
-
-
+- Thank You for Listening!
 
 
 

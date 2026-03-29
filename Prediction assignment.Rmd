@@ -37,29 +37,6 @@ missing_table
 sum(framing$TenYearCHD == 1)
 ```
 
-
-
-This analysis will evaluate the predictive performance and potential clinical usefulness of different modelling approaches for estimating the 10-year risk of coronary heart disease (CHD) using the Framingham dataset.
-
-The following sections will roughly follow the slides in my final presentation.
-
-Goals of the project:
-
-Handle missing values (First through ascertain of the type of missingness (MAR,MCAR,NMAR)). Missing values in predictor variables will first be addressed using imputation techniques to minimise bias and retain all observations. Following imputation, both traditional statistical learning methods (such as logistic regression) and machine learning approaches (including decision trees and random forests) will be trained to predict the binary outcome TenYearCHD.
-
-Model performance will be compared using discrimination metrics such as the area under the receiver operating characteristic curve (AUC) and calibration assessments. Finally, decision curve analysis will be used to evaluate the net clinical benefit of each model across a range of risk thresholds, allowing assessment of which modelling approach may offer the greatest potential utility in a clinical decision-making context.
-
-
-Missing data - why must we handle it:
-Missing data must be addressed in this analysis because several predictors in the dataset contain incomplete observations. If these missing values were ignored and a complete case analysis were used, all subjects with any missing predictor would be excluded, which discards a substantial amount of available information and reduces statistical efficiency.
-For example, even when only a small proportion of predictor values are missing, complete case analysis may exclude a large proportion of subjects from the model, leading to less reliable estimates and reduced power.
-In addition, missing data may introduce selection bias if individuals with missing values differ systematically from those with complete data. Imputation methods therefore allow the use of information from partially observed records while reducing bias and improving the reliability of prediction models. 
-
-## Missingness Diagnostics
-
-Investigating Missingness:
-Missing data can arise through different mechanisms, including Missing Completely at Random (MCAR), where missingness occurs purely by chance; Missing at Random (MAR), where missingness is related to other observed variables in the dataset; and Missing Not at Random (MNAR), where the probability of missingness depends on the unobserved value itself or other unmeasured factors.
-
 ```{r}
 library(VIM)
 missing_table %>%
@@ -586,7 +563,7 @@ ggplot(data.frame(prob = bart_prob, actual = bart_actual_num),
 ```
 
 #############################################
-Table for Presentation
+Table + Plots for Presentation
 
 ```{r}
 # Save reusable plot/data objects for presentation

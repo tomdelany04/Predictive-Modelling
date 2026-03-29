@@ -12,6 +12,7 @@ library(gt)
 library(mice)
 library(tree)
 library(ggplot2)
+library(pROC)
 ```
 
 
@@ -20,7 +21,7 @@ library(ggplot2)
 framing <- read.csv("framingham_heart_study.csv")
 
 dim(framing)
-length(is.na(framing))
+sum(is.na(framing))
 
 head(framing)
 
@@ -60,14 +61,16 @@ Investigating Missingness:
 Missing data can arise through different mechanisms, including Missing Completely at Random (MCAR), where missingness occurs purely by chance; Missing at Random (MAR), where missingness is related to other observed variables in the dataset; and Missing Not at Random (MNAR), where the probability of missingness depends on the unobserved value itself or other unmeasured factors.
 
 ```{r}
+library(VIM)
 missing_table %>%
   arrange(desc(Missing_Count))
+png("agg_pattern.png", width = 1400, height = 900, res = 150)
+aggr(framing)
 ```
 
 ```{r}
 png("missing_pattern.png", width = 1400, height = 900, res = 150)
 md.pattern(framing, plot = TRUE)
-dev.off()
 ```
 
 ```{r}
@@ -133,9 +136,9 @@ pred
 
 Train Imputation
 ```{r}
-framing.imputed.train <- mice(
+framing_imputed_train <- mice(
   data = train_data,
-  m = 1,
+  m = 20,
   method = meth,
   predictorMatrix = pred,
   seed = 214,
@@ -143,7 +146,7 @@ framing.imputed.train <- mice(
   print = FALSE
 )
 
-train_complete <- complete(framing.imputed.train)
+train_complete <- complete(framing_imputed_train)
 ```
 
 Test Imputation
@@ -153,9 +156,9 @@ Test Imputation
 pred_test <- pred
 pred_test[, "TenYearCHD"] <- 0
 
-framing.imputed.test <- mice(
+framing_imputed_test <- mice(
   data = test_data,
-  m = 1,
+  m = 20,
   method = meth,
   predictorMatrix = pred_test,
   seed = 214,
@@ -163,17 +166,36 @@ framing.imputed.test <- mice(
   print = FALSE
 )
 
-test_complete <- complete(framing.imputed.test)
+test_complete <- complete(framing_imputed_test)
+```
+
+
+```{r}
+# Keep one completed dataset for diagnostics/plots and models that use a single dataset
+train_complete <- complete(framing_imputed_train, action = 1)
+test_complete  <- complete(framing_imputed_test, action = 1)
+
+# Also keep all completed datasets for MI prediction pooling in tree-based models
+train_all <- complete(framing_imputed_train, action = "all")
+test_all  <- complete(framing_imputed_test, action = "all")
 ```
 
 
 ```{r}
 # Convergence diagnostics
-plot(framing.imputed.train)
+plot(framing_imputed_train)
+```
+```{r}
+# Focused convergence check for glucose
+plot(framing_imputed_train, c("glucose"))
+```
+```{r}
+# Compare observed vs imputed glucose distributions
+densityplot(framing_imputed_train, ~ glucose)
 ```
 ```{r}
 # Convergence diagnostics
-plot(framing.imputed.test)
+plot(framing_imputed_test)
 ```
 
 ```{r}
@@ -190,22 +212,35 @@ train_complete %>%
 #Changing to factor so tree isnt a regression but classification tree
 train_complete$TenYearCHD <- factor(train_complete$TenYearCHD)
 test_complete$TenYearCHD  <- factor(test_complete$TenYearCHD)
+
+for (i in seq_along(train_all)) {
+  train_all[[i]]$TenYearCHD <- factor(train_all[[i]]$TenYearCHD, levels = c(0, 1))
+  test_all[[i]]$TenYearCHD  <- factor(test_all[[i]]$TenYearCHD, levels = c(0, 1))
+}
 ```
 
-
+##############################################################################################
 
 Naive tree
 ```{r}
 library(tree)
 
-tree.model <- tree(TenYearCHD ~ ., data = train_complete)
+# Fit one tree per imputed dataset and pool test predictions
+tree_prob_list <- vector("list", length(train_all))
+for (i in seq_along(train_all)) {
+  tree_fit_i <- tree(TenYearCHD ~ ., data = train_all[[i]])
+  p_i <- predict(tree_fit_i, newdata = test_all[[i]], type = "vector")
+  tree_prob_list[[i]] <- p_i[, "1"]
+}
 
-tree.pred <- predict(tree.model, test_complete, type = "class")
+tree_prob <- Reduce(`+`, tree_prob_list) / length(tree_prob_list)
+tree.pred <- factor(ifelse(tree_prob >= 0.5, 1, 0), levels = c(0, 1))
+tree_actual <- test_all[[1]]$TenYearCHD
 
-tree_cm <- table(Predicted = tree.pred, Actual = test_complete$TenYearCHD)
+tree_cm <- table(Predicted = tree.pred, Actual = tree_actual)
 tree_cm
 
-tree_accuracy <- mean(tree.pred == test_complete$TenYearCHD)
+tree_accuracy <- mean(tree.pred == tree_actual)
 tree_misclass <- 1 - tree_accuracy
 tree_sensitivity <- tree_cm["1", "1"] / sum(tree_cm[, "1"])
 tree_specificity <- tree_cm["0", "0"] / sum(tree_cm[, "0"])
@@ -219,30 +254,187 @@ c(
 ```
 
 ```{r}
+# Example tree from the first imputed training dataset
+tree.model <- tree(TenYearCHD ~ ., data = train_all[[1]])
 plot(tree.model)
 text(tree.model, pretty = 0, cex = 0.7)
 ```
 
+```{r}
 
+# Convert actual to numeric (0/1)
+tree_actual_num <- as.numeric(as.character(tree_actual))
+
+# ROC object
+tree_roc <- roc(tree_actual_num, tree_prob)
+
+# AUC
+auc_value_tree <- auc(tree_roc)
+
+# Plot
+plot(tree_roc, col = "blue", lwd = 2, main = "ROC Curve - Naive Tree")
+abline(a = 0, b = 1, lty = 2, col = "gray")
+text(0.6, 0.2, paste("AUC =", round(auc_value_tree, 3)))
+```
+
+```{r}
+ggplot(data.frame(prob = tree_prob, actual = tree_actual_num),
+       aes(x = prob, y = actual)) +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    title = "Calibration Curve (LOESS) - Naive Tree",
+    x = "Predicted Probability",
+    y = "Observed Probability"
+  ) +
+  theme_minimal()
+```
+```{r}
+#Brier
+mean((tree_prob - tree_actual_num)^2)
+```
+
+
+
+################################################################################################
+Pruned Tree
+
+
+```{r}
+set.seed(7)
+cv.framing <- cv.tree(tree.model)
+
+cv.framing
+
+best_size <- cv.framing$size[which.min(cv.framing$dev)]
+best_size
+
+prune.fram <- prune.tree(tree.model, best = 3)
+
+
+plot(prune.fram)
+text(prune.fram, pretty = 0)
+```
+
+```{r chunk10}
+tree.pred <- predict(prune.fram, newdata = test_complete, type = "class")
+tree_prob <- predict(prune.fram, newdata = test_complete, type = "vector")[, "1"]
+tree_actual <- test_complete$TenYearCHD
+tree_actual_num_prune <- as.numeric(as.character(tree_actual))
+```
+
+
+```{r}
+tree_cm <- table(Predicted = tree.pred, Actual = tree_actual)
+tree_cm
+
+tree_accuracy <- mean(tree.pred == tree_actual)
+tree_misclass <- 1 - tree_accuracy
+tree_sensitivity <- tree_cm["1", "1"] / sum(tree_cm[, "1"])
+tree_specificity <- tree_cm["0", "0"] / sum(tree_cm[, "0"])
+
+c(
+  Accuracy = tree_accuracy,
+  Misclassification = tree_misclass,
+  Sensitivity = tree_sensitivity,
+  Specificity = tree_specificity
+)
+
+
+```
+```{r}
+summary(prune.fram)
+
+
+```
+
+
+
+```{r}
+
+png("Roc_prune.png", width = 1600, height = 900, res = 200)
+
+tree_prune_roc <- roc(tree_actual_num_prune, tree_prob)
+
+plot(tree_prune_roc, col = "blue", lwd = 2,
+     main = "ROC Curve - Pruned Tree")
+abline(0, 1, lty = 2)
+
+auc_value_prune <- auc(tree_prune_roc)
+text(0.6, 0.2, paste("AUC =", round(auc_value_prune, 3)))
+
+```
+
+```{r}
+ggplot(data.frame(prob = tree_prob, actual = tree_actual_num_prune),
+       aes(x = prob, y = actual)) +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    title = "Calibration Curve (LOESS) - Pruned Tree",
+    x = "Predicted Probability",
+    y = "Observed Probability"
+  ) +
+  theme_minimal()
+```
+
+
+##############################################################################################
 Random Forest
 ```{r}
 
 library(randomForest)
-Framing.rf <- randomForest(TenYearCHD ~ ., 
-                        data = train_complete, 
-                        importance = TRUE,
-                        proximity = TRUE)
+rf_m <- min(10, length(train_all))   # use first 10 imputations for RF pooling
+rf_ntree <- 200 # fewer trees per forest
+
+#train m models on m complete data sets:
+rf <- NULL
+for (m in seq_len(rf_m)) {
+  rf[[m]] <- randomForest(
+    TenYearCHD ~ .,
+    data = train_all[[m]],
+    ntree = rf_ntree
+  )
+}
+
 ```
 
 ```{r}
-rf_pred <- predict(Framing.rf, newdata = test_complete)
-rf_cm <- table(Predicted = rf_pred, Actual = test_complete$TenYearCHD)
+#Pooling Votes from Each model
+rf_prob_list <- list() 
+
+for (m in seq_along(rf)) {
+  test_x_m <- test_all[[m]] %>% select(-TenYearCHD)
+  
+  rf_prob_list[[m]] <- predict(rf[[m]], test_x_m, type = "prob")[, "1"]  
+}
+rf_prob <- Reduce(`+`, rf_prob_list) / length(rf_prob_list)
+
+
+rf_pred <- factor(ifelse(rf_prob >= 0.5, 1, 0), levels = c(0, 1))
+
+rf_actual <- factor(test_all[[1]]$TenYearCHD, levels = c(0, 1))
+rf_actual_num <- as.numeric(as.character(rf_actual))
+                    
+#############                   
+    
+Framing.rf <- randomForest(
+  TenYearCHD ~ .,
+  data = train_all[[1]],
+  ntree = rf_ntree,
+  importance = TRUE,
+  proximity = FALSE
+)
+```
+
+```{r}
+rf_cm <- table(Predicted = rf_pred, Actual = rf_actual)
 rf_cm
 
-rf_accuracy <- mean(rf_pred == test_complete$TenYearCHD)
+rf_accuracy <- mean(rf_pred == rf_actual)
 rf_misclass <- 1 - rf_accuracy
-rf_sensitivity <- rf_cm["1", "1"] / sum(rf_cm[, "1"])
-rf_specificity <- rf_cm["0", "0"] / sum(rf_cm[, "0"])
+rf_sensitivity <- if (sum(rf_cm[, "1"]) > 0) rf_cm["1", "1"] / sum(rf_cm[, "1"]) else NA_real_
+rf_specificity <- if (sum(rf_cm[, "0"]) > 0) rf_cm["0", "0"] / sum(rf_cm[, "0"]) else NA_real_
 rf_oob_error <- Framing.rf$err.rate[nrow(Framing.rf$err.rate), "OOB"]
 
 c(
@@ -255,87 +447,242 @@ c(
 ```
 
 ```{r}
-plot(Framing.rf)
-varImpPlot(Framing.rf)
+# OOB error at final tree
+Framing.rf$err.rate[nrow(Framing.rf$err.rate), "OOB"]
 ```
 
+```{r}
+importance(Framing.rf)
+```
+
+```{r}
+plot(Framing.rf)
+imp <- varImpPlot(Framing.rf)
+colnames(imp)
+```
+
+Improving varimpplot for presentation
+
+```{r}
+imp <- as.data.frame(imp) 
+imp$varnames <- rownames(imp)
+rownames(imp) <- NULL
+
+imp$var_categ <- "All"
+
+Importance_plot <- ggplot(imp, aes(
+  x = reorder(varnames, MeanDecreaseGini),
+  y = MeanDecreaseGini,
+  color = var_categ
+)) + 
+  geom_point(size = 3, color = "#a80050", stroke = 1.2) +
+  geom_segment(aes(x = varnames, xend = varnames, y = 0, yend = MeanDecreaseGini),
+               linewidth = .7,
+               color = "#a80050") +
+  ylab("MeanDecreaseGini") + 
+  xlab("Variable") +
+  labs(title = "Random Forest Variable Importance") +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12)
+  )
+
+  
+```
+
+
+```{r}
+
+rf_roc <- roc(rf_actual, rf_prob)
+
+plot(rf_roc, col = "darkgreen", lwd = 2,
+     main = "ROC Curve - Random Forest (MI pooled)")
+abline(0, 1, lty = 2)
+
+auc_value <- auc(rf_roc)
+text(0.6, 0.2, paste("AUC =", round(auc_value, 3)))
+
+
+```
+
+```{r}
+ggplot(data.frame(prob = rf_prob, actual = rf_actual_num),
+       aes(x = prob, y = actual)) +
+  geom_smooth(method = "loess", se = FALSE, color = "darkgreen") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  coord_equal() +
+  theme_minimal() 
+  
+```
+
+
+
+##############################################################################################
 
 Bayesian Additive Regression Trees (BART)
 ```{r}
 library(BART)
 
-x_train <- train_complete %>% dplyr::select(-TenYearCHD)
-x_test  <- test_complete %>% dplyr::select(-TenYearCHD)
-y_train <- as.numeric(as.character(train_complete$TenYearCHD))
-y_test  <- as.numeric(as.character(test_complete$TenYearCHD))
+xtrain <- model.matrix(TenYearCHD ~ ., data = train_complete)[, -1, drop = FALSE]
+xtest  <- model.matrix(TenYearCHD ~ ., data = test_complete)[, -1, drop = FALSE]
+
+ytrain <- as.numeric(as.character(train_complete$TenYearCHD))
 
 set.seed(1)
-bartfit <- pbart(x.train = x_train, y.train = y_train, x.test = x_test)
+bartfit <- pbart(x.train = xtrain, y.train = ytrain, x.test = xtest)
+
+bart_prob <- bartfit$prob.test.mean
+bart_actual <- factor(test_complete$TenYearCHD, levels = c(0, 1))
+bart_pred <- factor(ifelse(bart_prob >= 0.5, 1, 0), levels = c(0, 1))
 ```
 
 ```{r}
 # Predicted probability of CHD=1
-bart_prob <- if (!is.null(bartfit$prob.test.mean)) bartfit$prob.test.mean else bartfit$yhat.test.mean
-bart_pred <- factor(ifelse(bart_prob >= 0.5, 1, 0), levels = c(0, 1))
-
-bart_cm <- table(Predicted = bart_pred, Actual = test_complete$TenYearCHD)
+bart_cm <- table(Predicted = bart_pred, Actual = bart_actual)
 bart_cm
 
-bart_accuracy <- mean(bart_pred == test_complete$TenYearCHD)
+bart_accuracy <- mean(bart_pred == bart_actual)
 bart_misclass <- 1 - bart_accuracy
 bart_sensitivity <- bart_cm["1", "1"] / sum(bart_cm[, "1"])
 bart_specificity <- bart_cm["0", "0"] / sum(bart_cm[, "0"])
-
-c(
-  Accuracy = bart_accuracy,
-  Misclassification = bart_misclass,
-  Sensitivity = bart_sensitivity,
-  Specificity = bart_specificity
-)
 ```
 
 ```{r}
-# Variable usage across posterior trees
-ord <- order(bartfit$varcount.mean, decreasing = TRUE)
-bartfit$varcount.mean[ord]
+
+bart_actual_num <- as.numeric(as.character(bart_actual))
+bart_roc <- roc(bart_actual_num, bart_prob)
+
+plot(bart_roc, col = "purple", lwd = 2,
+     main = "ROC Curve - BART")
+abline(0, 1, lty = 2)
+
+auc_value_bart <- auc(bart_roc)
+text(0.6, 0.2, paste("AUC =", round(auc_value_bart, 3)))
+
+
 ```
 
 
-Ridge regression (benchmark)
 ```{r}
-library(glmnet)
-
-x_train_mm <- model.matrix(TenYearCHD ~ ., data = train_complete)[, -1]
-x_test_mm  <- model.matrix(TenYearCHD ~ ., data = test_complete)[, -1]
-y_train_num <- as.numeric(as.character(train_complete$TenYearCHD))
-
-set.seed(214)
-ridge_cv <- cv.glmnet(
-  x = x_train_mm,
-  y = y_train_num,
-  family = "binomial",
-  alpha = 0
-)
-
-ridge_prob <- as.numeric(predict(ridge_cv, newx = x_test_mm, s = "lambda.min", type = "response"))
-ridge_pred <- factor(ifelse(ridge_prob >= 0.5, 1, 0), levels = c(0, 1))
-
-ridge_cm <- table(Predicted = ridge_pred, Actual = test_complete$TenYearCHD)
-ridge_cm
-
-ridge_accuracy <- mean(ridge_pred == test_complete$TenYearCHD)
-ridge_misclass <- 1 - ridge_accuracy
-ridge_sensitivity <- ridge_cm["1", "1"] / sum(ridge_cm[, "1"])
-ridge_specificity <- ridge_cm["0", "0"] / sum(ridge_cm[, "0"])
-
-c(
-  Accuracy = ridge_accuracy,
-  Misclassification = ridge_misclass,
-  Sensitivity = ridge_sensitivity,
-  Specificity = ridge_specificity,
-  Lambda = ridge_cv$lambda.min
-)
+ggplot(data.frame(prob = bart_prob, actual = bart_actual_num),
+       aes(x = prob, y = actual)) +
+  geom_smooth(method = "loess", se = FALSE, color = "purple", linewidth = 1.2) +
+  geom_abline(slope = 1, intercept = 0,
+              linetype = "dashed", color = "gray40") +
+  labs(
+    title = "Calibration Curve - BART",
+    x = "Predicted Probability",
+    y = "Observed Probability"
+  ) +
+  coord_equal() +
+  theme_minimal()
 ```
+
+#############################################
+Table for Presentation
+
+```{r}
+# Save reusable plot/data objects for presentation
+library(dplyr)
+library(ggplot2)
+library(pROC)
+
+results_summary <- data.frame(
+  Model = c("Pruned Tree", "Random Forest", "BART"),
+  AUC = c(
+    as.numeric(auc(tree_prune_roc)),
+    as.numeric(auc(rf_roc)),
+    as.numeric(auc(bart_roc))
+  ),
+  Brier = c(
+    mean((tree_prob - tree_actual_num_prune)^2),
+    mean((rf_prob - rf_actual_num)^2),
+    mean((bart_prob - bart_actual_num)^2)
+  ),
+  MC_Error = c(
+    tree_misclass,
+    rf_misclass,
+    bart_misclass
+  )
+) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+```
+
+```{r}
+results_summary_long <- data.frame(
+  Model = rep(results_summary$Model, each = 3),
+  Metric = rep(c("AUC", "Brier", "MC Error"), times = nrow(results_summary)),
+  Value = c(t(as.matrix(results_summary[, c("AUC", "Brier", "MC_Error")]))),
+  stringsAsFactors = FALSE
+)
+
+results_summary_plot <- ggplot(results_summary_long, aes(x = Metric, y = Model, fill = Value)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(aes(label = sprintf("%.3f", Value)), size = 5, fontface = "bold") +
+  scale_fill_gradient(low = "#f0f8ff", high = "#a80050") +
+  labs(title = "Model Comparison: AUC, Brier, MC Error", x = NULL, y = NULL) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    panel.grid = element_blank(),
+    axis.text.x = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold")
+  )
+
+roc_curves_plot <- pROC::ggroc(
+  list("Pruned Tree" = tree_prune_roc, "Random Forest" = rf_roc, "BART" = bart_roc),
+  legacy.axes = TRUE,
+  linewidth = 1.2
+) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  scale_color_manual(values = c("Pruned Tree" = "blue", "Random Forest" = "darkgreen", "BART" = "purple")) +
+  labs(title = "ROC Curves", x = "1 - Specificity", y = "Sensitivity", color = "Model") +
+  theme_minimal(base_size = 12)
+
+bart_calibration_df <- data.frame(
+  prob = bart_prob,
+  actual = bart_actual_num,
+  Model = "BART"
+)
+
+calibration_plot <- ggplot(bart_calibration_df, aes(x = prob, y = actual)) +
+  geom_smooth(method = "loess", se = FALSE, linewidth = 1.2, color = "purple") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  labs(title = "Calibration Curve - BART", x = "Predicted Probability", y = "Observed Probability") +
+  theme_minimal(base_size = 12)
+
+saveRDS(Importance_plot, "importance_plot_obj.rds")
+saveRDS(results_summary_plot, "results_summary_plot_obj.rds")
+saveRDS(roc_curves_plot, "roc_curves_plot_obj.rds")
+saveRDS(calibration_plot, "calibration_plot_obj.rds")
+
+saveRDS(
+  list(
+    results_summary = results_summary,
+    tree_prune_roc = tree_prune_roc,
+    rf_roc = rf_roc,
+    bart_roc = bart_roc,
+    bart_calibration_df = bart_calibration_df
+  ),
+  "model_results_objects.rds"
+)
+
+results_summary
+```
+
+
+
+
+
+
+
 
 
 

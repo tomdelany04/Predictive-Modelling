@@ -61,7 +61,7 @@ resources:
 </ul>
 :::
 
-- This missingness pattern motivates using **MICE** to retain observations and reduce bias from complete-case analysis. <img src="missing_pattern.png" style="height:90px; vertical-align:middle; margin-left:10px;">
+- This missingness pattern motivates using **MICE** to retain observations and reduce bias from complete-case analysis. <img src="agg_pattern.png" style="height:90px; vertical-align:middle; margin-left:10px;">
 
 ## MICE <img src="MICE.png" style="height:80px; vertical-align:middle; position:relative; "> <span class="mice-cite"><a href="https://www.jstatsoft.org/article/view/v045i03">Van Buuren & Groothuis-Oudshoorn(2011)</a></span> {.mice-slide}
 
@@ -106,8 +106,8 @@ train_complete <- complete(framing.imputed.train)
 
 ::: {.info-box .fragment data-fragment-index="2"}
 <ul>
-  <li><strong>Data split:</strong> 70% train, 30% test.</li>
-  <li><strong>Why MICE:</strong> preserves sample size and reduces complete-case bias.</li>
+  <li class="fragment"><strong>Data split:</strong> 70% train, 30% test.</li>
+  <li class="fragment"><strong>Why MICE:</strong> preserves sample size and reduces complete-case bias.</li>
 </ul>
 :::
 :::
@@ -127,16 +127,16 @@ train_complete <- complete(framing.imputed.train)
 - Models fit in this project: <strong>Pruned Decision Tree</strong>, Random Forest, BART, and Ridge Regression (benchmark).
 
 
-## Classic Decision Tree  {.tree-slide}
+## Pruned tree  {.tree-slide}
 
 ::: {.columns}
 ::: {.column width="42%"}
 ::: {.mice-box}
-<p class="fragment" data-fragment-index="1"><strong>Classification Decision Trees</strong> use a top-down, greedy approach known as recursive binary splitting.</p>
+<p class="fragment" data-fragment-index="1"><strong> Classification Decision Trees</strong> use a top-down, greedy approach known as recursive binary splitting.</p>
 
 <p class="fragment" data-fragment-index="3">We use the Gini index for binary splits, this measure of inequality, was first introduced by Italian Statistician Corrado [Gini](https://ourworldindata.org/what-is-the-gini-coefficient) in 1912</p>
 
-<p class="fragment" data-fragment-index="4">We can evaluate our trees performance using a variety of metrics, we will assess the results of all our approaches at the end of this lecture</p>
+<p class="fragment" data-fragment-index="4">Pruning is done to prevent overfitting, improving predictive accuracy on unseen data</p>
 
 :::
 :::
@@ -145,40 +145,38 @@ train_complete <- complete(framing.imputed.train)
 ```{r tree}
 #| echo: true
 #| eval: false
-#| code-line-numbers: "|1-7|9-11|12-19|"
+#| code-line-numbers: "|1-5|7-10|12-17|"
 library(tree)
-tree_prob_list <- vector("list", length(train_all))
-for (i in seq_along(train_all)) {
-  tree_fit_i <- tree(TenYearCHD ~ ., data = train_all[[i]])
-  p_i <- predict(tree_fit_i, newdata = test_all[[i]], type = "vector")
-  tree_prob_list[[i]] <- p_i[, "1"]
-}
+set.seed(21400626)
+cv.framing <- cv.tree(tree.model)
+best_size <- cv.framing$size[which.min(cv.framing$dev)]
+prune.fram <- prune.tree(tree.model, best = 3)
 
-tree_cm <- table(Predicted = tree.pred, Actual = tree_actual)
-tree_cm
+tree.pred <- predict(prune.fram, newdata = test_complete, type = "class")
+tree_prob <- predict(prune.fram, newdata = test_complete, type = "vector")[, "1"]
+tree_actual <- test_complete$TenYearCHD
+tree_actual_num_prune <- as.numeric(as.character(tree_actual))
 
-tree_accuracy <- mean(tree.pred == tree_actual)
-tree_misclass <- 1 - tree_accuracy
-tree_sensitivity <- tree_cm["1", "1"] / sum(tree_cm[, "1"])
-tree_specificity <- tree_cm["0", "0"] / sum(tree_cm[, "0"])
+tree_prune_roc <- roc(tree_actual_num_prune, tree_prob)
+plot(tree_prune_roc, col = "blue", lwd = 2,
+     main = "ROC Curve - Pruned Tree")
+abline(0, 1, lty = 2)
+auc_value_prune <- auc(tree_prune_roc)
+text(0.6, 0.2, paste("AUC =", round(auc_value_prune, 3)))
 ```
 
 ::: {.info-box .fragment data-fragment-index="2"}
 <ul>
-  <li><i class="fa-solid fa-bullseye"></i><strong>Build the tree</strong> in the training data.</li>
-  <li><i class="fa-solid fa-bullseye"></i><strong>Evaluate performance</strong> in the test set.</li>
-  <li><i class="fa-solid fa-bullseye"></i><strong>Overfitting</strong> is a major issue in this naive        approach, pruning helps to combat this.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Build the tree</strong> in the training data.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Evaluate performance</strong> in the test set.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Overfitting</strong> is a major issue in this approach, pruning helps to combat this.</li>
 </ul>
 :::
 :::
 :::
 
 
-
-## Pruned tree 
-
-
-## Random Forest  {.rf-slide}
+## Random Forest <img src="Forest.png" style="height:90px; vertical-align:middle; position:relative; "> {.rf-slide}
 
 ::: {.columns}
 ::: {.column width="42%"}
@@ -195,7 +193,7 @@ tree_specificity <- tree_cm["0", "0"] / sum(tree_cm[, "0"])
 ```{r rf}
 #| echo: true
 #| eval: false
-#| code-line-numbers: "|1-6|8-10|12-17|"
+#| code-line-numbers: "|1-6|8-9|11-15|"
 library(randomForest)
 Framing.rf <- randomForest(
   TenYearCHD ~ ., data = train_complete,
@@ -204,26 +202,26 @@ Framing.rf <- randomForest(
 )
 
 rf_pred <- predict(Framing.rf, newdata = test_complete)
-rf_cm <- table(Predicted = rf_pred, Actual = test_complete$TenYearCHD)
-rf_cm
+Framing.rf$err.rate[nrow(Framing.rf$err.rate), "OOB"]
 
-rf_accuracy <- mean(rf_pred == test_complete$TenYearCHD)
-rf_sensitivity <- rf_cm["1", "1"] / sum(rf_cm[, "1"])
-rf_specificity <- rf_cm["0", "0"] / sum(rf_cm[, "0"])
-rf_oob_error <- Framing.rf$err.rate[nrow(Framing.rf$err.rate), "OOB"]
+imp <- varImpPlot(Framing.rf)
+rf_roc <- roc(rf_actual, rf_prob)
+plot(rf_roc, col = "darkgreen", lwd = 2,
+     main = "ROC Curve - Random Forest (MI pooled)")
+abline(0, 1, lty = 2)
 ```
 
 ::: {.info-box .fragment data-fragment-index="2"}
 <ul>
-  <li><i class="fa-solid fa-bullseye"></i><strong>Training:</strong> fit the forest on imputed training data.</li>
-  <li><i class="fa-solid fa-bullseye"></i><strong>Testing:</strong> evaluate confusion matrix and sensitivity/specificity on test data.</li>
-  <li><i class="fa-solid fa-bullseye"></i><strong>OOB error:</strong> internal estimate of test error from out-of-bag observations.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Training:</strong> fit the forest on imputed training data.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Testing:</strong> evaluate confusion matrix and build ROC and Claibration on test data.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>OOB error:</strong> internal estimate of test error from out-of-bag observations.</li>
 </ul>
 :::
 :::
 :::
 
-## BART <img src="Bart_Simpson.png" style="height:90px; vertical-align:middle; position:relative; "> Bayesian Additive Regression Trees {.bart-slide}
+##  <img src="Bart_Simpson.png" style="height:90px; vertical-align:middle; position:relative; "> <span class="bart-acronym"><span class="bart-initial">B</span>ayesian <span class="bart-initial">A</span>dditive <span class="bart-initial">R</span>egression <span class="bart-initial">T</span>rees</span> {.bart-slide}
 
 ::: {.columns}
 ::: {.column width="42%"}
@@ -240,38 +238,143 @@ rf_oob_error <- Framing.rf$err.rate[nrow(Framing.rf$err.rate), "OOB"]
 ```{r bart}
 #| echo: true
 #| eval: false
-#| code-line-numbers: "|1-4|6-8|10-13 |"
+#| code-line-numbers: "|1-4|6-8|10-13|"
 library(BART)
-x_train <- train_complete %>% select(-TenYearCHD)
-x_test  <- test_complete %>% select(-TenYearCHD)
-y_train <- as.numeric(as.character(train_complete$TenYearCHD))
+xtrain <- model.matrix(TenYearCHD ~ ., data = train_complete)[, -1, drop = FALSE]
+xtest  <- model.matrix(TenYearCHD ~ ., data = test_complete)[, -1, drop = FALSE]
 
-bartfit <- pbart(x.train = x_train, y.train = y_train, x.test = x_test)
+ytrain <- as.numeric(as.character(train_complete$TenYearCHD))
+
+set.seed(1)
+bartfit <- pbart(x.train = xtrain, y.train = ytrain, x.test = xtest)
+
 bart_prob <- bartfit$prob.test.mean
+bart_actual <- factor(test_complete$TenYearCHD, levels = c(0, 1))
 bart_pred <- factor(ifelse(bart_prob >= 0.5, 1, 0), levels = c(0, 1))
 
-bart_cm <- table(Predicted = bart_pred, Actual = test_complete$TenYearCHD)
-bart_accuracy <- mean(bart_pred == test_complete$TenYearCHD)
-bart_sensitivity <- bart_cm["1", "1"] / sum(bart_cm[, "1"])   
-bart_specificity <- bart_cm["0", "0"] / sum(bart_cm[, "0"])
+
 ```
 
 ::: {.info-box .fragment data-fragment-index="2"}
 <ul>
-  <li><i class="fa-solid fa-bullseye"></i><strong>Training:</strong> fit Bayesian tree ensemble on imputed training data.</li>
-  <li><i class="fa-solid fa-bullseye"></i><strong>Prediction:</strong> convert posterior mean probabilities to classes.</li>
-  <li><i class="fa-solid fa-bullseye"></i><strong>Evaluation:</strong> assess confusion matrix, sensitivity, and specificity on test data.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Training:</strong> fit Bayesian tree ensemble on imputed training data.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Prediction:</strong> convert posterior mean probabilities to classes.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Evaluation:</strong> assess confusion matrix, sensitivity, and specificity on test data.</li>
 </ul>
 :::
 :::
 :::
 
 
-## References 
+
+## Results {.results-slide}
+
+::: {.results-grid}
+::: {.results-left}
+::: {.info-box .results-notes}
+<ul>
+  <li class="fragment" data-fragment-index="1"><i class="fa-solid fa-bullseye"></i><strong>Pruned tree simplicity:</strong> only two splits (<code>age</code>, then <code>sysBP</code>) keep the rule set interpretable.</li>
+  <li class="fragment" data-fragment-index="2"><i class="fa-solid fa-chart-line"></i><strong>RF importance:</strong> top-ranked variables are <code>sysBP</code>, <code>BMI</code>, <code>glucose</code>, and <code>totChol</code>.</li>
+  <li class="fragment" data-fragment-index="3"><i class="fa-solid fa-table"></i><strong>Model summary:</strong> BART gives the strongest overall discrimination and error profile.</li>
+</ul>
+:::
+
+::: {.results-summary .fragment data-fragment-index="5"}
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 5
+#| fig-height: 1.7
+
+results_summary_plot_obj <- readRDS("results_summary_plot_obj.rds")
+results_summary_plot_obj
+```
+:::
+:::
+
+::: {.results-right}
+::: {.fragment data-fragment-index="4"}
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 8
+#| fig-height: 3.9
+
+importance_plot_obj <- readRDS("importance_plot_obj.rds")
+importance_plot_obj
+```
+:::
+:::
+:::
+
+
+## Best of a Bad Bunch {.bart-best-slide}
+
+::: {.info-box}
+<ul>
+  <li class="fragment"><strong>Best discrimination:</strong> BART delivered the highest AUC (0.719) in our test-set comparison.</li>
+  <li class="fragment"><strong>Why it wins:</strong> Bayesian regularization plus sequential tree updates helps capture nonlinear signal while controlling overfit.</li>
+  <li class="fragment"><strong>Practical upside:</strong> strong performance with limited tuning.</li>
+</ul>
+:::
+
+::: {.columns}
+::: {.column .fragment width="50%"}
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 6
+#| fig-height: 3.2
+
+roc_curves_plot_obj <- readRDS("roc_curves_plot_obj.rds")
+roc_curves_plot_obj
+```
+:::
+
+::: {.column .fragment width="50%"}
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig-width: 6
+#| fig-height: 3.2
+
+calibration_plot_obj <- readRDS("calibration_plot_obj.rds")
+calibration_plot_obj
+```
+:::
+:::
+
+## Conclusion
+
+::: {.info-box}
+<ul>
+  <li class="fragment"><strong>Overall performance was moderate:</strong> tree-based methods captured useful signal, but discrimination remained limited for this CHD task.</li>
+  <li class="fragment"><strong>Why trees may underperform here:</strong> clinical predictors can be weakly separated, noisy, and partially collinear, which can limit gains from split-based rules alone.</li>
+  <li class="fragment"><strong>Next step from this module:</strong> shrinkage, regularization, and dimension-reduction approaches may provide stronger generalization and more stable classification performance.</li>
+</ul>
+:::
+
+- {.fragment} In practice, these alternatives can reduce variance, handle correlated predictors more effectively, and improve out-of-sample accuracy.
+
+
+## References
 
 - <span class="mice-cite"><a href="https://www.jstatsoft.org/article/view/v045i03">Van Buuren & Groothuis-Oudshoorn (2011)</a>
 
 - <span class="mice-cite"><a href="https://www.thelancet.com/action/showPdf?pii=S0140-6736%2813%2961752-3">S Mahmood et al., (2014)</a>
+
+- 
+
+
+
+
+
+
+
 
 
 

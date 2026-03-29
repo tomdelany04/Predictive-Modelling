@@ -58,7 +58,6 @@ partial_vars
 
 ## Single and Multiple Imputation Using `mice` (Ref: Van Buuren 2011)
 
-First we split:
 ```{r}
 set.seed(214)
 
@@ -68,8 +67,6 @@ train_data <- framing[train_index, ]
 test_data  <- framing[-train_index, ]
 ```
 
-
-Now we will do multiple imputation using the `mice()` function in the `mice` library. NB `mice` stands for multivariate imputation by chained equations. We include `TenYearCHD` as a predictor in imputation models but do not impute `TenYearCHD`, so we can analyse each imputed dataset afterwards.
 
 ```{r}
 train_data <- train_data %>%

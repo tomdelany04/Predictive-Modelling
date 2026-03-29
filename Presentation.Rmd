@@ -213,7 +213,7 @@ abline(0, 1, lty = 2)
 ::: {.info-box .fragment data-fragment-index="2"}
 <ul>
   <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Training:</strong> fit the forest on imputed training data.</li>
-  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Testing:</strong> evaluate confusion matrix and build ROC and Claibration on test data.</li>
+  <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>Testing:</strong> evaluate confusion matrix and build ROC and Calibration on test data.</li>
   <li class="fragment"><i class="fa-solid fa-bullseye"></i><strong>OOB error:</strong> internal estimate of test error from out-of-bag observations.</li>
 </ul>
 :::

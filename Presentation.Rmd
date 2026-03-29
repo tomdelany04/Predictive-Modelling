@@ -8,7 +8,7 @@ format:
     incremental: true
     logo: "University_Of_Galway_Logo.png"
     css: styles.css
-    footer: "Github link here"
+    footer: "[GitHub](https://github.com/tomdelany04/Predictive-Modelling)"
     slide-number: true
     multiplex: false
     theme: simple
@@ -358,16 +358,17 @@ calibration_plot_obj
 </ul>
 :::
 
-- {.fragment} In practice, these alternatives can reduce variance, handle correlated predictors more effectively, and improve out-of-sample accuracy.
+- In practice, these alternatives can reduce variance, handle correlated predictors more effectively, and improve out-of-sample accuracy.
 
 
 ## References
 
-- <span class="mice-cite"><a href="https://www.jstatsoft.org/article/view/v045i03">Van Buuren & Groothuis-Oudshoorn (2011)</a>
+- <span class="mice-cite"><a href="https://www.jstatsoft.org/article/view/v045i03">Van Buuren & Groothuis-Oudshoorn (2011)</a> - MICE
 
-- <span class="mice-cite"><a href="https://www.thelancet.com/action/showPdf?pii=S0140-6736%2813%2961752-3">S Mahmood et al., (2014)</a>
+- <span class="mice-cite"><a href="https://www.thelancet.com/action/showPdf?pii=S0140-6736%2813%2961752-3">S Mahmood et al., (2014)</a> - Framingham Study
 
-- 
+- <span class="mice-cite"><a href="https://emitanaka.org/slides/toronto2022/#/title-slide">E Tanaka (2022)</a> - Template for Presentation
+
 
 
 
